@@ -1,5 +1,45 @@
-<!DOCTYPE html>
-<html>
-<head><title>Test</title></head>
-<body><h1>Thành công!</h1></body>
-</html>
+ if(!o.regions.length)throw new Error("No valid header regions (file corrupted)");
+ o.regions.slice(0,3).forEach((r,i)=>r.name=["stringLiteral","stringLiteralData","string"][r.index]||"");return o}
+/* ---------- runner ---------- */
+let busy=false,cur=null;
+const opt=()=>({fmt:$("#o-fmt").value,verb:$("#o-verb").checked,str:$("#o-str").checked,sym:$("#o-sym").checked,rep:$("#o-rep").checked,auto:$("#o-auto").checked});
+const tick=()=>new Promise(r=>setTimeout(r,60));
+function prog(p,state,op){$("#r-bar").style.width=p+"%";$("#r-pct").textContent=Math.round(p)+"%";$("#r-state").textContent=state;$("#r-op").textContent=op||state}
+function log(m){const l=$("#log");l.textContent+=`[${new Date().toLocaleTimeString()}] ${m}\n`;l.scrollTop=l.scrollHeight}
+$$("[data-run]").forEach(b=>b.onclick=()=>run(b.dataset.run));
+async function run(k){if(busy)return;const f=files[k];if(!f){toast("Choose a file first","err");return}
+ busy=true;const o=opt(),t0=performance.now(),btn=$(`[data-run=${k}]`);btn.disabled=true;setSt(k,"Processing");
+ $("#res").classList.remove("hide");$("#r-act").classList.add("hide");$("#log").textContent="";$("#r-items").textContent="0";
+ const R={tool:"RUSTYCAIN Binary Analyzer",options:getO(),outputDir:$("#outdir").value,module:k,mode:"local-browser",file:{name:f.name,size:f.size},generated:new Date().toISOString()};
+ try{prog(5,"Initializing...");log("Module: "+k.toUpperCase());await tick();
+  prog(20,"Reading file...");log(`Reading ${f.name} (${fmt(f.size)})`);await tick();
+  if(k==="meta"){prog(45,"Analyzing...");R.header=await parseMeta(f);log(`Metadata version ${R.header.version}, ${R.header.regions.length} regions`);R.items=R.header.regions.length}
+  else{prog(40,"Analyzing...");const e=await parseELF(f,log);R.elf=e;log(`${e.class} ${e.arch} ${e.typeName}, ${e.sections.length} sections`);
+   if(o.sym||k==="ac"){log(`Dynamic symbols: ${e.imports.length} imports, ${e.exports.length} exports`)}
+   prog(60,"Analyzing...");
+   if(o.str||k==="ac"){R.strings=await strings(f,log);log(`Strings: ${R.strings.length}`)}
+   if(k==="il2cpp"){const ex=e.exports.filter(n=>n.startsWith("il2cpp_")),sx=(R.strings||[]).filter(s=>/il2cpp|unity/i.test(s));
+    R.il2cpp={apiExports:ex,hints:sx.slice(0,20),looksLikeIl2cpp:ex.length>0||sx.length>0};log(R.il2cpp.looksLikeIl2cpp?`IL2CPP indicators found (${ex.length} API exports)`:"No IL2CPP indicators found");
+    if(!o.sym){delete e.imports;delete e.exports}}
+   if(k==="ac"){const all=e.imports.concat(e.exports);R.security={stripped:e.symbols===0,sectionsWX:e.sections.filter(s=>s.flags.includes("W")&&s.flags.includes("X")).map(s=>s.name),usesPtrace:all.some(n=>/ptrace/.test(n)),usesDlopen:all.some(n=>/dlopen/.test(n))};log("Basic properties computed")}
+   R.items=e.sections.length+e.symbols;
+   prog(80,"Analyzing...");R.hashes=await hashes(f);log("SHA-256: "+R.hashes.sha256)}
+  if(o.verb)log("Verbose: "+JSON.stringify(R).length+" bytes of report data");
+  prog(92,"Generating report...");await tick();R.timeMs=Math.round(performance.now()-t0);cur=R;report[k]=R;
+  $("#r-items").textContent=R.items||0;$("#r-time").textContent=R.timeMs+" ms";prog(100,"Completed","Done");log("Completed");setSt(k,"Completed");
+  $("#r-act").classList.remove("hide");toast("Analysis completed","ok");
+  if(o.auto)setTimeout(clearRes,15000);
+  $("#res").scrollIntoView({behavior:"smooth"})}
+ catch(x){console.error(x);setSt(k,"Error");prog(0,"Error","Failed");log("ERROR: "+x.message);toast("Analysis failed: "+x.message,"err")}
+ finally{busy=false;btn.disabled=false}}
+function clearRes(){cur=null;$("#res").classList.add("hide");$("#log").textContent=""}
+$("#a-clr").onclick=clearRes;
+function dl(name,text,type){const u=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement("a");a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),2000)}
+function toTxt(r,ind=""){return Object.entries(r).map(([k,v])=>v&&typeof v==="object"?`${ind}${k}:\n`+(Array.isArray(v)?v.map(x=>typeof x==="object"?ind+"  - "+JSON.stringify(x):ind+"  - "+x).join("\n"):toTxt(v,ind+"  ")):`${ind}${k}: ${v}`).join("\n")}
+const base=()=>cur.module+"_"+cur.file.name.replace(/[^\w.-]/g,"_");
+$("#a-json").onclick=()=>cur&&dl(base()+".json",JSON.stringify(cur,null,2),"application/json");
+$("#a-txt").onclick=()=>cur&&dl(base()+".txt",toTxt(cur),"text/plain");
+$("#a-rep").onclick=()=>{if(!cur)return;opt().fmt==="TXT"?dl(base()+"_report.txt",toTxt(cur),"text/plain"):dl(base()+"_report.json",JSON.stringify(cur,null,2),"application/json")};
+addEventListener("error",e=>toast("Unexpected error: "+e.message,"err"));
+addEventListener("unhandledrejection",e=>toast("Unexpected error: "+(e.reason&&e.reason.message||e.reason),"err"));
+</script></body></html>
